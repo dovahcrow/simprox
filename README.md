@@ -1,9 +1,11 @@
 # simprox
 
-[![Build release](https://github.com/cars10/simprox/actions/workflows/build.yml/badge.svg)](https://github.com/cars10/simprox/actions/workflows/build.yml)
-[![Docker build](https://img.shields.io/docker/cloud/automated/cars10/simprox.svg)](https://hub.docker.com/r/cars10/simprox)
+[![Build release](https://github.com/dovahcrow/simprox/actions/workflows/build.yml/badge.svg)](https://github.com/dovahcrow/simprox/actions/workflows/build.yml)
+[![Docker build](https://img.shields.io/docker/cloud/automated/dovahcrow/simprox.svg)](https://hub.docker.com/r/dovahcrow/simprox)
 
 | **Sim**ple **Prox**y Server
+
+This is a fork of `cars10/simprox`. This version adds host rewrite.
 
 Simprox is a fast and simple local proxy server.
 
@@ -15,14 +17,14 @@ It forwards the complete original request to your proxy target and returns the r
 
 ### Binary
 
-You can download the latest binary for linux, macos and windows from [github](https://github.com/cars10/simprox/releases).
+You can download the latest binary for linux, macos and windows from [github](https://github.com/dovahcrow/simprox/releases).
 
 ### Docker
 
-Download the [image](https://hub.docker.com/r/cars10/simprox):
+Download the [image](https://hub.docker.com/r/dovahcrow/simprox):
 
 ```bash
-docker pull cars10/simprox
+docker pull dovahcrow/simprox
 ```
 
 ## Usage
@@ -78,7 +80,7 @@ docker run --rm \
            -e LISTEN=0.0.0.0:7000 \
            -e TARGET_HOST=http://localhost:9200 \
            --net host \
-           cars10/simprox
+           dovahcrow/simprox
 ```
 
 b) Your service is accessible via `http://example.com`
@@ -88,7 +90,7 @@ docker run --rm \
            -p 7000:7000 \
            -e LISTEN=0.0.0.0:7000 \
            -e TARGET_HOST=http://example.com \
-           cars10/simprox
+           dovahcrow/simprox
 ```
 
 c) Your service is running in another docker container named `test` on port `3000`
@@ -99,7 +101,7 @@ docker run --rm \
            -e LISTEN=0.0.0.0:7000 \
            -e TARGET_HOST=http://test:3000 \
            --link test \
-           cars10/simprox
+           dovahcrow/simprox
 ```
 
 
@@ -116,7 +118,7 @@ Dependencies
 Build
 
 ```bash
-git clone git@github.com:cars10/simprox.git
+git clone git@github.com:dovahcrow/simprox.git
 cd simprox
 cargo build --release
 ./target/release/simprox --help

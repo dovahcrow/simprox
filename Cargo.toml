@@ -1,8 +1,8 @@
 [package]
-authors = ["Carsten König <carstenkoenig92@gmail.com>"]
+authors = ["Carsten König <carstenkoenig92@gmail.com>", "Weiyuan Wu <weiyuan@crows.land>"]
 edition = "2018"
 name = "simprox"
-version = "0.4.0"
+version = "0.4.1"
 
 [dependencies]
 anyhow = "1"

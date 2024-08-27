@@ -19,8 +19,15 @@ use crate::{
 };
 
 #[derive(Debug, Parser)]
+#[command(version, about = "Simple proxy server", long_about = None)]
 struct Cli {
-    #[arg(short, long, env, help = "Set the host for the proxy server itself")]
+    #[arg(
+        short,
+        long,
+        env,
+        help = "Set the host for the proxy server itself",
+        default_value = "127.0.0.1:7000"
+    )]
     listen: SocketAddr,
 
     #[arg(short, long, env, help = "Sets the proxy target (required)")]
