@@ -1,192 +1,78 @@
-#[macro_use]
-extern crate clap;
-#[macro_use]
-extern crate log;
-use chrono::SecondsFormat;
-use hyper_tls::{native_tls::TlsConnector, HttpsConnector};
-use std::convert::Infallible;
-use std::error::Error;
+mod client;
+mod logger;
+mod original_request;
+mod proxy;
+
+use std::net::SocketAddr;
 use std::sync::Arc;
-use warp::hyper::{
-    body::{Body, Bytes},
-    client::connect::HttpConnector,
-    Client, Request,
+
+use anyhow::{Context, Error};
+use clap::Parser;
+use culpa::throws;
+use tracing::info;
+use url::Url;
+use warp::Filter;
+
+use crate::{
+    client::https_client, logger::setup_logger, original_request::OriginalRequest,
+    proxy::proxy_request,
 };
-use warp::{
-    http::{method::Method, HeaderMap, Response},
-    path::FullPath,
-    Filter, Rejection,
-};
 
-type HttpsClient = Client<HttpsConnector<HttpConnector>, Body>;
+#[derive(Debug, Parser)]
+struct Cli {
+    #[arg(short, long, env, help = "Set the host for the proxy server itself")]
+    listen: SocketAddr,
 
-mod args;
+    #[arg(short, long, env, help = "Sets the proxy target (required)")]
+    target_host: Url,
 
-pub fn setup_logger() -> Result<(), Box<dyn Error>> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{}] {} -- {}",
-                chrono::Local::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-                record.level(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Info)
-        .level_for("warp", log::LevelFilter::Off)
-        .chain(std::io::stdout())
-        .apply()?;
-    Ok(())
+    #[arg(long, env, help = "Disable ssl certificate verification")]
+    skip_ssl_verify: bool,
+
+    #[arg(long, env, help = "Whether to rewrite the host to target_host")]
+    rewrite_host: bool,
 }
 
-fn https_client(skip_ssl_verify: bool) -> HttpsClient {
-    let mut tls_builder = TlsConnector::builder();
-    let tls_builder = tls_builder.danger_accept_invalid_certs(skip_ssl_verify);
-    let tls_builder = tls_builder.danger_accept_invalid_hostnames(skip_ssl_verify);
-
-    let tls = tls_builder.build().unwrap();
-
-    let mut http = HttpConnector::new();
-    http.enforce_http(false);
-    let https = HttpsConnector::from((http, tls.into()));
-
-    Client::builder().build(https)
-}
-
-async fn proxy_request(
-    original_request: OriginalRequest,
-    client: Arc<HttpsClient>,
-    target_host: Arc<String>,
-) -> Result<Response<Body>, Rejection> {
-    info!(
-        "[{}] {}{}",
-        &original_request.method.as_str(),
-        &original_request.path.as_str(),
-        &original_request.query_string()
-    );
-
-    let request = build_request(original_request, target_host);
-
-    match client.request(request).await {
-        Ok(proxy_response) => {
-            let proxy_status = proxy_response.status();
-            let proxy_headers = proxy_response.headers().clone();
-            let proxy_body = proxy_response.into_body();
-
-            let mut response = Response::new(proxy_body);
-            *response.status_mut() = proxy_status;
-            *response.headers_mut() = proxy_headers;
-            info!(" => {}", proxy_status);
-
-            Ok(response)
-        }
-        Err(e) => {
-            error!("FAILED: proxy server unavailable");
-            error!("{:?}", e);
-            Ok(Response::builder()
-                .status(503)
-                .body("proxy target unavailable".into())
-                .unwrap())
-        }
-    }
-}
-
-fn build_request(original_request: OriginalRequest, target_host: Arc<String>) -> Request<Body> {
-    let location = format!(
-        "{}{}{}",
-        target_host,
-        original_request.path.as_str(),
-        original_request.query_string()
-    );
-
-    let mut request = Request::new(Body::from(original_request.body));
-    *request.method_mut() = original_request.method;
-    *request.uri_mut() = location.parse().expect("invalid uri");
-    *request.headers_mut() = original_request.headers;
-    request
-}
-
-fn with_client(
-    client: Arc<HttpsClient>,
-) -> impl Filter<Extract = (Arc<HttpsClient>,), Error = Infallible> + Clone {
-    warp::any().map(move || client.clone())
-}
-
-fn with_target_host(
-    target_host: Arc<String>,
-) -> impl Filter<Extract = (Arc<String>,), Error = Infallible> + Clone {
-    warp::any().map(move || target_host.clone())
-}
-
-fn with_raw_query() -> impl Filter<Extract = (String,), Error = Infallible> + Clone {
-    warp::filters::query::raw()
-        .or(warp::any().map(String::default))
-        .unify()
-}
-
-struct OriginalRequest {
-    method: Method,
-    path: FullPath,
-    query: String,
-    headers: HeaderMap,
-    body: Bytes,
-}
-
-impl OriginalRequest {
-    fn new(method: Method, path: FullPath, query: String, headers: HeaderMap, body: Bytes) -> Self {
-        OriginalRequest {
-            method,
-            path,
-            query,
-            headers,
-            body,
-        }
-    }
-
-    fn query_string(&self) -> String {
-        if self.query.is_empty() {
-            String::default()
-        } else {
-            format!("?{}", self.query)
-        }
-    }
-}
-
+#[throws(Error)]
 #[tokio::main]
 async fn main() {
-    setup_logger().expect("Error setting up logger");
+    setup_logger()?;
 
     ctrlc::set_handler(|| {
         info!("Stopping simprox...");
         std::process::exit(0);
     })
-    .expect("Error setting exit handler");
+    .with_context(|| "Error setting exit handler")?;
 
-    let config = args::Config::build();
+    let mut cli = Cli::parse();
 
-    let addr: std::net::SocketAddr = config.listen.parse().unwrap_or_else(|_| {
-        error!("Invalid listen host: {}", config.listen);
-        std::process::exit(-1)
-    });
+    info!("Listening on: {}", cli.listen);
+    info!("Proxy target: {}", cli.target_host);
+    info!("Skip ssl verify: {}", cli.skip_ssl_verify);
+    info!("Rewrite host: {}", cli.rewrite_host);
 
-    info!("Listening on: {}", addr);
-    info!("Proxy target: {}", config.target_host);
-    info!("Skip ssl verify: {}", config.skip_ssl_verify);
-    info!("");
+    cli.target_host.set_path("");
+    cli.target_host.set_query(None);
 
-    let client = Arc::new(https_client(config.skip_ssl_verify));
-    let target_host = Arc::new(config.target_host);
+    let target_host = Arc::new(cli.target_host);
+    let rewrite_host = cli.rewrite_host;
 
+    let client = Arc::new(https_client(cli.skip_ssl_verify));
     let routes = warp::method()
         .and(warp::path::full())
-        .and(with_raw_query())
+        .and({
+            warp::filters::query::raw()
+                .or(warp::any().map(String::default))
+                .unify()
+        })
         .and(warp::header::headers_cloned())
         .and(warp::body::bytes())
         .map(OriginalRequest::new)
-        .and(with_client(client))
-        .and(with_target_host(target_host))
+        .and(warp::any().map(move || client.clone()))
+        .and(warp::any().map(move || target_host.clone()))
+        .and(warp::any().map(move || rewrite_host))
         .and_then(proxy_request)
         .with(warp::cors().allow_any_origin());
 
-    warp::serve(routes).run(addr).await;
+    warp::serve(routes).run(cli.listen).await;
 }

@@ -3,21 +3,20 @@ authors = ["Carsten König <carstenkoenig92@gmail.com>"]
 edition = "2018"
 name = "simprox"
 version = "0.4.0"
+
 [dependencies]
+anyhow = "1"
 chrono = "0.4"
+clap = { version = "4", features = ["cargo", "env", "derive"] }
 ctrlc = "3.2"
-fern = "0.6"
-log = "0.4"
+culpa = "1"
+hyper = "1"
 hyper-tls = "0.5"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+url = "2"
 warp = "0.3"
-
-[dependencies.clap]
-features = ["cargo", "env"]
-version = "4"
-
-[dependencies.tokio]
-features = ["full"]
-version = "1"
 
 [profile.release]
 lto = true
